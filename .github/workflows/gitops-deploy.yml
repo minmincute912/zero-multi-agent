@@ -1,0 +1,165 @@
+name: gitops-deploy
+
+# PR: lint + test only.
+# Push to main: lint + test; build and push images to GHCR only when docker-services/ or mcp-plugins/ changed;
+# then (optionally) tell the VPS to sync over Tailscale. The VPS also pulls on its own every 5 minutes
+# (hermes-gitops.timer), so a missed deploy trigger heals itself.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: gitops-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a deploy mid-flight
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+
+      - name: Block secrets and local state in the tree
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)\.env(\..+)?$|\.sqlite3?$|(^|/)browser-profiles/' | grep -Ev '(^|/)\.env\.(example|sample|template)$' || true)
+          if [ -n "$bad" ]; then echo "::error::forbidden files are tracked:"; echo "$bad"; exit 1; fi
+
+      - name: Install tooling
+        run: pip install --quiet ruff pyyaml "mcp>=2.3,<3" httpx
+
+      - name: Lint Python
+        run: ruff check docker-services mcp-plugins
+
+      - name: Validate YAML, JSON and skills
+        run: |
+          python - <<'PY'
+          import glob, json, pathlib, re, sys, yaml
+          for f in glob.glob("**/*.y*ml", recursive=True):
+              if f.startswith("."): continue
+              list(yaml.safe_load_all(open(f)))
+          for f in glob.glob("mcp-plugins/*/manifest.json"):
+              json.load(open(f))
+          for f in glob.glob("hermes-core/skills/*/SKILL.md"):
+              d = pathlib.Path(f).parent.name
+              m = re.search(r"^name:\s*(\S+)\s*$", open(f).read(), re.M)
+              if not m or m.group(1) != d:
+                  sys.exit(f"{f}: frontmatter name must equal directory name {d!r}")
+          PY
+
+      - name: Shell syntax and shellcheck
+        run: |
+          shopt -s globstar nullglob
+          for f in deploy/*.sh docker-services/**/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
+          shellcheck -S warning deploy/*.sh docker-services/**/*.sh
+
+      - name: Compose file renders
+        run: |
+          cp .env.example .env
+          sed -i 's/^LITELLM_MASTER_KEY=$/LITELLM_MASTER_KEY=ci/; s/^VNC_PASSWORD=$/VNC_PASSWORD=ci/' .env
+          docker compose --env-file .env -f docker-services/docker-compose.yml config -q
+
+      - name: Smoke test MCP servers import and register tools
+        run: |
+          python - <<'PY'
+          import asyncio, importlib.util, sys
+          def load(path):
+              spec = importlib.util.spec_from_file_location("srv", path)
+              m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+          for path, want in [("mcp-plugins/_template/server.py", {"ping", "echo"}),
+                             ("docker-services/node-control-plane/server.py", {"list_nodes", "health_check", "dispatch_job", "quota_status"})]:
+              m = load(path)
+              tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
+              if not want <= tools: sys.exit(f"{path}: missing tools {want - tools}")
+          PY
+
+  discover:
+    needs: lint-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      build: ${{ steps.m.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: m
+        run: |
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$before" 2>/dev/null; then
+            changed=all
+          elif git diff --name-only "$before" "${{ github.sha }}" | grep -qE '^(docker-services|mcp-plugins)/'; then
+            changed=yes
+          else
+            changed=no
+          fi
+          echo "build=$([ "$changed" = no ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+          # image name -> build context. Plugins are every mcp-plugins/<dir> not starting with "_".
+          items='[{"name":"mcp-web-worker","context":"docker-services/mcp-web-worker"},{"name":"node-control-plane","context":"docker-services/node-control-plane"}'
+          for d in mcp-plugins/*/; do
+            n=$(basename "$d"); case "$n" in _*) continue;; esac
+            items="$items,{\"name\":\"$n\",\"context\":\"mcp-plugins/$n\"}"
+          done
+          echo "matrix={\"include\":$items]}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/hermes-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    # Runs after a successful build, or when nothing needed building (config/skills-only change).
+    needs: [discover, build]
+    if: >-
+      always() && needs.discover.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      vars.DEPLOY_VIA_TAILSCALE == 'true'
+    runs-on: ubuntu-24.04
+    concurrency: { group: vps-deploy, cancel-in-progress: false }
+    steps:
+      # One-time setup: Tailscale OAuth client (secrets TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET, tag:ci) and an ACL that
+      # lets tag:ci use Tailscale SSH to <APP_USER>@VPS. Repository variables: DEPLOY_VIA_TAILSCALE=true, VPS_HOST, VPS_USER.
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Sync VPS (only changed parts are touched; Hermes restarts via `gateway restart` only if its config changed)
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "${{ vars.VPS_USER || 'hermes' }}@${{ vars.VPS_HOST }}" \
+            '/opt/hermes-platform/deploy/update-vps.sh'

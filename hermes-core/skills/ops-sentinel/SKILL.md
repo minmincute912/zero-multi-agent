@@ -23,12 +23,12 @@ Health checks must cost no tokens: use a script-only cron job (`--no-agent`). Th
    [ "$disk" -ge 85 ] && echo "Disk ${disk}% used"
    docker stats --no-stream --format '{{.Name}} {{.MemPerc}}' 2>/dev/null |
      awk '{p=$2; sub("%","",p); if (p+0 >= 85) print "container " $1 " RAM " $2}'
-   for hp in localhost:8001 localhost:8002; do
-     curl -s -o /dev/null --max-time 3 -H 'Accept: text/event-stream' "http://$hp/sse" \
-       || [ $? -eq 28 ] || echo "satellite $hp unreachable"
+   for hp in localhost:4000 localhost:8001 localhost:8002; do
+     curl -s -o /dev/null --max-time 3 "http://$hp/" \
+       || [ $? -eq 28 ] || echo "service $hp unreachable"
    done
    ```
-   `curl` exit 28 (timeout) is accepted because an SSE stream stays open when healthy. Adjust the ports and add a heartbeat for remote satellites if they live on other hosts.
+   Any HTTP answer counts as alive (curl exits 0 even on 4xx). Exit 28 (timeout) is accepted because a Streamable HTTP endpoint may hold the connection open. Ports: 4000 inference-router, 8001 mcp-web-worker, 8002 node-control-plane. For remote satellite nodes, call the `node-control-plane` `health_check` tool instead.
 2. **Schedule it**:
    ```
    hermes cron create "every 5m" --no-agent --script ops-check.sh --deliver <channel> --name "ops-sentinel"

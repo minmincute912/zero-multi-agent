@@ -1,0 +1,66 @@
+# LiteLLM proxy config: one OpenAI-compatible endpoint (http://127.0.0.1:4000/v1) over free-tier providers.
+# Model groups (what Hermes asks for):  light  |  heavy  |  coder
+# Several deployments sharing one model_name are load-balanced; a deployment that returns 429/errors is put on
+# cooldown and the request retried on another one, then on the group's fallback.
+#
+# Model IDs below were read from the providers' live lists on 2026-11-17 (OpenRouter /api/v1/models, Cloudflare docs).
+# Free catalogs rotate often: run deploy/list-free-models.sh and update this file by PR.
+# Only free models belong here. Nothing in this file can bill unless you add a paid model.
+
+model_list:
+  # ---- light: classify, summarize, JSON parsing (Cloudflare Workers AI free quota) ----
+  # Needs CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID in the environment.
+  - model_name: light
+    litellm_params:
+      model: cloudflare/@cf/meta/llama-3.2-3b-instruct
+      api_key: os.environ/CLOUDFLARE_API_KEY
+  - model_name: light
+    litellm_params:
+      model: cloudflare/@cf/meta/llama-3.1-8b-instruct-fp8
+      api_key: os.environ/CLOUDFLARE_API_KEY
+
+  # ---- heavy: reasoning, long context, tool calling (OpenRouter ":free" models) ----
+  - model_name: heavy
+    litellm_params:
+      model: openrouter/inclusionai/ling-3.2-flash:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: heavy
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: heavy
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3.5-lightning:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # TODO: Nous Portal free models. No model ID is hardcoded because I could not verify the catalog.
+  # Run deploy/list-free-models.sh with NOUS_API_KEY set, pick a free model, then uncomment:
+  # - model_name: heavy
+  #   litellm_params:
+  #     model: openai/<nous-free-model-id>
+  #     api_base: https://inference-api.nousresearch.com/v1
+  #     api_key: os.environ/NOUS_API_KEY
+
+  # ---- coder: code-oriented free model ----
+  - model_name: coder
+    litellm_params:
+      model: openrouter/cohere/north-mini-code:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+litellm_settings:
+  drop_params: true              # free models reject some OpenAI params; drop instead of failing
+  num_retries: 2                 # retries per model_name before falling back
+  request_timeout: 60
+  turn_off_message_logging: true # do not keep prompt/response bodies in logs
+  # Fallback is tried once per request. heavy has none on purpose: a 3B model must not silently answer hard tasks.
+  fallbacks: [{"light": ["heavy"]}, {"coder": ["heavy"]}]
+  context_window_fallbacks: [{"light": ["heavy"]}]   # Cloudflare 3B has a smaller window than the heavy pool
+
+router_settings:
+  routing_strategy: simple-shuffle
+  enable_pre_call_checks: true   # required for context_window_fallbacks
+  allowed_fails: 3
+  cooldown_time: 60              # seconds a failing/429 deployment is skipped
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

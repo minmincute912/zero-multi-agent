@@ -16,6 +16,8 @@ Goal: spend $0. Pick the cheapest lane that can do the job, and never touch a pa
 
 Pick concrete model IDs from each provider's current model list at call time. Do not rely on remembered IDs.
 
+When the platform router is running (`http://127.0.0.1:4000/v1`), do not choose providers yourself: ask for the model group `light` (light tier), `heavy` (heavy tier) or `coder` (code). The router load-balances, applies cooldowns on 429 and falls back (`light`/`coder` fall back to `heavy`; `heavy` has no fallback). The provider-level steps below apply only when you call a provider directly.
+
 ## Procedure
 1. Classify the task into a tier. When unsure, start one tier lighter and escalate on failure.
 2. Check remaining quota for the lane before a batch (provider dashboard or API). Estimate cost: calls x tokens.

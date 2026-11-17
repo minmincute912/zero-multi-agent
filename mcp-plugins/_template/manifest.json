@@ -1,0 +1,10 @@
+{
+  "name": "example-plugin",
+  "version": "0.1.0",
+  "description": "What this MCP server does, in one sentence.",
+  "transport": "streamable-http",
+  "port": 8000,
+  "mcp_path": "/mcp",
+  "env": [],
+  "resources": { "mem_limit": "256m", "cpus": 0.5 }
+}

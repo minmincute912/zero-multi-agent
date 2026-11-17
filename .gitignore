@@ -6,6 +6,10 @@
 *.sqlite3
 browser-profiles/
 
+*.pem
+*.key
+docker-services/node-control-plane/config/nodes.yaml
+
 __pycache__/
 *.pyc
 .claude/settings.local.json
