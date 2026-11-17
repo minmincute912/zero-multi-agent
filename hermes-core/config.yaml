@@ -1,0 +1,41 @@
+# Hermes Agent core config. Merge these keys into ~/.hermes/config.yaml (nothing loads this file automatically yet).
+# Schema: https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference
+# Secrets: put in ~/.hermes/.env and reference as ${VAR}. Never inline them here.
+# After editing, run /reload-mcp in Hermes.
+
+mcp_servers:
+  # --- stdio (lightweight, spawned by Hermes) ---
+  filesystem:
+    command: "npx"
+    # Scoped to ONE directory on purpose. Change the path to your agent workspace; do not widen to $HOME.
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/srv/hermes/workspace"]
+    timeout: 120
+    enabled: true
+
+  fetch:
+    command: "uvx"
+    args: ["mcp-server-fetch"]
+    timeout: 120
+    enabled: true
+    # Web search is not covered by fetch. Add a search MCP later with /new-mcp if needed.
+
+  # --- sse (Docker containers; not built or started by this repo yet) ---
+  mcp-web-worker:
+    url: "http://localhost:8001/sse"
+    transport: sse
+    timeout: 300
+    connect_timeout: 30
+    enabled: true
+
+  node-control-plane:
+    url: "http://localhost:8002/sse"
+    transport: sse
+    timeout: 300
+    connect_timeout: 30
+    enabled: true
+
+skills:
+  # Skills Hermes creates are written here (Git-tracked) and also loaded from here.
+  # Set HERMES_CORE_DIR in ~/.hermes/.env to this repo's hermes-core/ path.
+  # If it is unset the skills are NOT loaded (Hermes silently skips missing dirs).
+  create_dir: ${HERMES_CORE_DIR}/skills
