@@ -1,19 +1,18 @@
 # Hermes Agent Platform
 
-Hệ thống agent chạy 24/7 với chi phí suy luận **$0**: Hermes Agent (Nous Research) chạy native, mọi lệnh gọi LLM đi qua
-một router LiteLLM gom mọi nguồn miễn phí (Cloudflare, OpenRouter `:free`, Nous Portal `:free`, tùy chọn Colab Ollama),
-router chạy trong Docker. Kiến trúc có 2 khối: **Hermes Core (native)** và **LiteLLM Inference Router**. Mục tiêu: một trợ lý cá nhân chạy 24/7.
+Trợ lý cá nhân chạy 24/7 với chi phí suy luận **$0**. Hermes Agent (Nous Research) chạy native trên VPS; mọi lệnh gọi LLM
+đi qua một router LiteLLM trong Docker, gom các nguồn miễn phí: Cloudflare Workers AI, OpenRouter `:free`, Nous Portal `:free`
+và tùy chọn Ollama trên Google Colab.
 
 ```
-                      ┌──────────── VPS Ubuntu 24.04 (3 vCPU / 6 GB) ────────────────────┐
- Telegram/Slack ───►  │  Hermes Agent (native, systemd user unit hermes-gateway, ~330 MB)│
-                      │    │ stdio: filesystem, fetch (npx/uvx)                          │
-                      │    │ HTTP (127.0.0.1):                                           │
-                      │    └─► :4000 inference-router (LiteLLM, Docker)                  │
-                      │           light ─► Cloudflare Workers AI (1B/3B/8B)              │
-                      │           heavy, coder ─► OpenRouter ":free"                     │
-                      │           fallback ─► heavy-backup: Nous ":free" (+ Colab Ollama)│
-                      └───────────────────────────────────────────────────────────────────┘
+                      ┌─ VPS Ubuntu 24.04 (3 vCPU / 6 GB) ──────────────────────────────────┐
+Telegram/Slack ───►   │  Hermes Agent (native, systemd user unit hermes-gateway, ~330 MB)   │
+                      │    ├─ stdio: filesystem, fetch (npx/uvx)                            │
+                      │    └─ HTTP 127.0.0.1:4000 ─► inference-router (LiteLLM, Docker)     │
+                      │          light ─► Cloudflare Workers AI (Llama 1B/3B/8B)            │
+                      │          heavy, coder ─► OpenRouter ":free"                         │
+                      │          fallback ─► heavy-backup: Nous ":free" (+ Colab Ollama)    │
+                      └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Cấu trúc
@@ -57,8 +56,7 @@ curl -s -H "Authorization: Bearer $LITELLM_MASTER_KEY" http://127.0.0.1:4000/v1/
   -d '{"model":"heavy","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
 ```
 
-Cổng chỉ bind `127.0.0.1`. Nếu chưa cài Hermes local, chỉ cần thử router bằng lệnh `curl` ở trên.
-Dịch vụ MCP dùng **Streamable HTTP** (đường dẫn `/mcp`), không dùng SSE: SDK MCP v2 coi SSE là legacy và Hermes mặc định dùng Streamable HTTP.
+Cổng chỉ bind `127.0.0.1`. Chưa cài Hermes ở local thì chỉ cần thử router bằng lệnh `curl` ở trên.
 
 ## Triển khai lên VPS
 
