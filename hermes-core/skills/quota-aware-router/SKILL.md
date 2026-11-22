@@ -1,6 +1,6 @@
 ---
 name: quota-aware-router
-description: Choose which free-tier LLM provider to use for each task so inference stays at $0. Light tasks go to Cloudflare Workers AI; heavy tasks go to OpenRouter or Nous Portal models marked ":free". Use before delegating work to a model, when a provider returns 429/quota errors, or when planning a batch of LLM calls.
+description: Choose which free-tier LLM provider to use for each task so inference stays at $0. Light tasks go to Cloudflare Workers AI; heavy tasks go to OpenRouter models marked ":free", then larger Cloudflare models as backup. Use before delegating work to a model, when a provider returns 429/quota errors, or when planning a batch of LLM calls.
 ---
 
 # Quota-Aware Router
@@ -11,7 +11,7 @@ Goal: spend $0. Pick the cheapest lane that can do the job, and never touch a pa
 | Tier | Tasks | Lane |
 |---|---|---|
 | Light | classify, tag, route, short summary, extract fields, yes/no checks | Cloudflare Workers AI (small instruct model) |
-| Heavy | long-context reading, multi-step reasoning, tool-calling chains, drafting | OpenRouter `:free` model, or Nous Portal free model |
+| Heavy | long-context reading, multi-step reasoning, tool-calling chains, drafting | OpenRouter `:free` model; backup is a larger Cloudflare model |
 | Judgment | irreversible actions, money, security, ambiguous goals | Stop. Ask the user; a paid model is a manual choice |
 
 Pick concrete model IDs from each provider's current model list at call time. Do not rely on remembered IDs.
@@ -29,7 +29,9 @@ When the platform router is running (`http://127.0.0.1:4000/v1`), do not choose 
 ## Quota facts (unverified, from a public article, checked 2026-11-14)
 - Cloudflare Workers AI free tier: about 10,000 neurons/day, resets 00:00 UTC.
 - OpenRouter `:free` models: rate-limited, availability varies per model.
-- Nous Portal free plan: free models only; paid models are blocked without credit.
+- OpenRouter `:free`: 20 requests/min and 50 requests/day until $10 of credit has been bought (1,000/day after). Checked 2026-11-23 from its docs.
+- Nous Portal: API keys need funds or a subscription, so it is not a $0 lane (confirmed 2026-11-23).
+- Cloudflare retires models without notice in the docs: 1b and 8b-fp8 returned 410 on 2026-11-23. Ping before trusting an ID.
 - AMD Token Lab: trial, expires about 2026-12-14. Evaluation only.
 Re-check these at the provider before relying on them. Update this section with a new date when you do.
 

@@ -1,7 +1,7 @@
 # Hermes Agent Platform
 
 Trợ lý cá nhân chạy 24/7 với chi phí suy luận **$0**. Hermes Agent (Nous Research) chạy native trên VPS; mọi lệnh gọi LLM
-đi qua một router LiteLLM trong Docker, gom các nguồn miễn phí: Cloudflare Workers AI, OpenRouter `:free`, Nous Portal `:free`
+đi qua một router LiteLLM trong Docker, gom các nguồn miễn phí: Cloudflare Workers AI, OpenRouter `:free`
 và tùy chọn Ollama trên Google Colab.
 
 ```
@@ -9,9 +9,9 @@ và tùy chọn Ollama trên Google Colab.
 Telegram/Slack ───►   │  Hermes Agent (native, systemd user unit hermes-gateway, ~330 MB)   │
                       │    ├─ stdio: filesystem, fetch (npx/uvx)                            │
                       │    └─ HTTP 127.0.0.1:4000 ─► inference-router (LiteLLM, Docker)     │
-                      │          light ─► Cloudflare Workers AI (Llama 1B/3B/8B)            │
+                      │          light ─► Cloudflare Workers AI (Llama 3B, Granite)        │
                       │          heavy, coder ─► OpenRouter ":free"                         │
-                      │          fallback ─► heavy-backup: Nous ":free" (+ Colab Ollama)    │
+                      │          fallback ─► heavy-backup: Cloudflare GLM/GPT-OSS/Gemma     │
                       └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -30,10 +30,10 @@ Telegram/Slack ───►   │  Hermes Agent (native, systemd user unit herme
 
 Hermes chỉ biết một endpoint (`http://127.0.0.1:4000/v1`, khóa là `LITELLM_MASTER_KEY`) và ba nhóm model:
 
-- `light`: Cloudflare Workers AI (Llama 3.2 1B/3B, Llama 3.1 8B). Phân loại, tóm tắt, parse JSON. Tác vụ phụ của Hermes (nén ngữ cảnh, đặt tiêu đề) cũng dùng nhóm này.
+- `light`: Cloudflare Workers AI (Llama 3.2 3B, Granite 4.0 micro). Phân loại, tóm tắt, parse JSON. Tác vụ phụ của Hermes (nén ngữ cảnh, đặt tiêu đề) cũng dùng nhóm này.
 - `heavy`: các model OpenRouter `:free`, mặc định cho suy luận và tool-calling.
 - `coder`: OpenRouter `:free`. Hiện OpenRouter không còn model free chuyên code (`cohere/north-mini-code:free` đã biến mất), nên nhóm này dùng model tổng quát lớn nhất.
-- `heavy-backup` (chỉ dùng làm fallback, Hermes không gọi trực tiếp): Nous Portal `:free` (`NOUS_API_KEY`) và tùy chọn Ollama trên Google Colab T4 (`COLAB_OLLAMA_BASE_URL` qua IP Tailscale, đang để comment trong `config.yaml`).
+- `heavy-backup` (chỉ dùng làm fallback, Hermes không gọi trực tiếp): các model Cloudflare lớn hơn (GLM-4.7-flash, GPT-OSS-20B, Gemma 4 26B) có hạn mức riêng, và tùy chọn Ollama trên Google Colab T4 (`COLAB_OLLAMA_BASE_URL` qua IP Tailscale, đang để comment trong `config.yaml`).
 
 Nhiều deployment cùng nhóm được chia tải; deployment dính 429/lỗi bị cooldown 60 giây rồi request chuyển sang deployment khác.
 Chuỗi fallback: `light` → `heavy` → `heavy-backup`; `heavy` → `heavy-backup`; `coder` → `heavy` → `heavy-backup`.
@@ -41,12 +41,12 @@ Chuỗi chỉ đi lên nhóm mạnh hơn, không bao giờ hạ xuống model 1-
 Mọi model trong `config.yaml` đều là model free, nên cấu hình này không thể tính phí trừ khi bạn thêm model trả phí.
 
 Danh sách model free thay đổi liên tục. Chạy `deploy/list-free-models.sh` rồi sửa `docker-services/inference-router/config.yaml` qua PR.
-Catalog Nous Portal công khai, script cũng liệt kê các model `:free`.
+Tài liệu Cloudflare vẫn liệt kê model đã ngừng (trả `410`), nên phải gọi thử từng ID bằng khóa thật trước khi thêm. Nous Portal bị loại vì tạo key cần nạp tiền hoặc đăng ký gói.
 
 ## Chạy thử trên máy local
 
 ```bash
-cp .env.example .env     # điền LITELLM_MASTER_KEY, OPENROUTER_API_KEY, CLOUDFLARE_*, NOUS_API_KEY
+cp .env.example .env     # điền LITELLM_MASTER_KEY, OPENROUTER_API_KEY, CLOUDFLARE_*
 docker compose --env-file .env -f docker-services/docker-compose.yml up -d --build
 docker compose --env-file .env -f docker-services/docker-compose.yml ps    # chờ healthy
 
@@ -93,7 +93,6 @@ Skill do Hermes tự tạo nằm trong `hermes-core/skills/` dưới dạng file
 |---|---|---|
 | `OPENROUTER_API_KEY` | openrouter.ai/keys | `.env` |
 | `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard, Workers AI | `.env` |
-| `NOUS_API_KEY` | Nous Portal (cho nhóm `heavy-backup`) | `.env` |
 | `COLAB_OLLAMA_BASE_URL` | IP Tailscale của Colab Ollama (tùy chọn) | `.env` |
 | `LITELLM_MASTER_KEY` | `setup-vps.sh` tự sinh | `.env` và `~/.hermes/.env` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS` | BotFather và user id của bạn | `~/.hermes/.env` |

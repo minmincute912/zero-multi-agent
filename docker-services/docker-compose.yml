@@ -23,7 +23,6 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CLOUDFLARE_API_KEY: ${CLOUDFLARE_API_KEY:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
-      NOUS_API_KEY: ${NOUS_API_KEY:-}
       COLAB_OLLAMA_BASE_URL: ${COLAB_OLLAMA_BASE_URL:-}
     volumes:
       - ./inference-router/config.yaml:/app/config.yaml:ro

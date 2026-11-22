@@ -3,8 +3,9 @@
 # Several deployments sharing one model_name are load-balanced; a deployment that returns 429/errors is put on
 # cooldown and the request retried on another one, then on the group's fallback.
 #
-# Model IDs below were read from the providers' live lists on 2026-11-22 (OpenRouter and Nous /v1/models, Cloudflare docs).
-# Free catalogs rotate often: run deploy/list-free-models.sh and update this file by PR.
+# Model IDs below were checked on 2026-11-23: OpenRouter from its live list, Cloudflare by a real call (200).
+# Free catalogs rotate often and Cloudflare's docs still list retired models (410 "deprecated" on 2026-11-20), so
+# re-test every ID with a ping before adding it. deploy/list-free-models.sh shows OpenRouter's current free list.
 # Only free models belong here. Nothing in this file can bill unless you add a paid model.
 
 model_list:
@@ -12,15 +13,11 @@ model_list:
   # Needs CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID in the environment.
   - model_name: light
     litellm_params:
-      model: cloudflare/@cf/meta/llama-3.2-1b-instruct
-      api_key: os.environ/CLOUDFLARE_API_KEY
-  - model_name: light
-    litellm_params:
       model: cloudflare/@cf/meta/llama-3.2-3b-instruct
       api_key: os.environ/CLOUDFLARE_API_KEY
   - model_name: light
     litellm_params:
-      model: cloudflare/@cf/meta/llama-3.1-8b-instruct-fp8
+      model: cloudflare/@cf/ibm-granite/granite-4.0-h-micro
       api_key: os.environ/CLOUDFLARE_API_KEY
 
   # ---- heavy: reasoning, long context, tool calling (OpenRouter ":free" models) ----
@@ -49,18 +46,20 @@ model_list:
       api_key: os.environ/OPENROUTER_API_KEY
 
   # ---- heavy-backup: used only after heavy/coder fail (see fallbacks). Not called by Hermes directly. ----
-  # Nous Portal free models (ids ending ":free", price 0, tool calling; catalog is public at
-  # https://inference-api.nousresearch.com/v1/models). Needs NOUS_API_KEY.
+  # Larger Cloudflare Workers AI models: a quota independent of OpenRouter's 50 requests/day on free models.
+  # Tool-calling support of these three is untested. Neuron cost per call is higher than the small light models.
   - model_name: heavy-backup
     litellm_params:
-      model: openai/qwen/qwen4-max:free
-      api_base: https://inference-api.nousresearch.com/v1
-      api_key: os.environ/NOUS_API_KEY
+      model: cloudflare/@cf/zai-org/glm-4.7-flash
+      api_key: os.environ/CLOUDFLARE_API_KEY
   - model_name: heavy-backup
     litellm_params:
-      model: openai/stepfun/step-3.7-flash:free
-      api_base: https://inference-api.nousresearch.com/v1
-      api_key: os.environ/NOUS_API_KEY
+      model: cloudflare/@cf/openai/gpt-oss-20b
+      api_key: os.environ/CLOUDFLARE_API_KEY
+  - model_name: heavy-backup
+    litellm_params:
+      model: cloudflare/@cf/google/gemma-4-26b-a4b-it
+      api_key: os.environ/CLOUDFLARE_API_KEY
 
   # Optional: Ollama on a Google Colab T4 reached over Tailscale. Colab sessions die after hours, so keep it last.
   # To enable: set COLAB_OLLAMA_BASE_URL in .env (e.g. http://100.x.y.z:11434), pull a model there
