@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bootstrap a fresh Ubuntu 24.04 VPS (4 vCPU / 8 GB). Idempotent: safe to re-run.
+# Bootstrap a fresh Ubuntu 24.04 VPS (sized for 3 vCPU / 6 GB). Idempotent: safe to re-run.
 #   sudo REPO_URL=https://github.com/<owner>/<repo>.git TS_AUTHKEY=tskey-... ./deploy/setup-vps.sh
 # Optional: APP_USER=hermes APP_DIR=/opt/hermes-platform BRANCH=main TS_HOSTNAME=hermes-vps CLOSE_PUBLIC_SSH=1
 # It does NOT start the agent: you fill in API keys first (printed at the end).
@@ -17,9 +17,18 @@ export DEBIAN_FRONTEND=noninteractive
 [ "${VERSION_ID:-}" = "24.04" ] || echo "warn: written for Ubuntu 24.04, found ${VERSION_ID:-unknown}" >&2
 as_app() { sudo -u "$APP_USER" -H "$@"; }
 
-echo "== 1/9 packages"
+echo "== 1/9 packages + swap"
 apt-get update -qq
 apt-get install -y -qq curl git ca-certificates jq ufw openssl util-linux nodejs npm >/dev/null
+# 2 GB swap absorbs Chromium spikes. Skipped when the host already has any swap.
+if [ -z "$(swapon --show --noheadings)" ]; then
+  if [ ! -f /swapfile ]; then
+    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    chmod 600 /swapfile && mkswap /swapfile >/dev/null
+  fi
+  swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
 
 echo "== 2/9 user $APP_USER"
 id "$APP_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$APP_USER"
@@ -38,10 +47,10 @@ else
   tailscale status >/dev/null 2>&1 || echo "warn: Tailscale not connected. Run: sudo tailscale up --ssh" >&2
 fi
 
-echo "== 5/9 firewall (deny inbound except Tailscale and rate-limited SSH)"
+echo "== 5/9 firewall (deny inbound; Tailscale only reaches SSH and the service ports; public SSH rate-limited)"
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
-ufw allow in on tailscale0 >/dev/null
+for port in 22 4000 6080 8001; do ufw allow in on tailscale0 to any port "$port" proto tcp >/dev/null; done
 if [ "${CLOSE_PUBLIC_SSH:-0}" = 1 ]; then
   tailscale status >/dev/null 2>&1 || { echo "ERROR: refusing CLOSE_PUBLIC_SSH without a working Tailscale (you would lock yourself out)" >&2; exit 1; }
   ufw delete limit 22/tcp >/dev/null 2>&1 || true
@@ -49,7 +58,9 @@ else
   ufw limit 22/tcp >/dev/null
 fi
 ufw --force enable >/dev/null
-# Containers publish only on 127.0.0.1 (docker-compose.yml), so Docker's iptables bypass of ufw does not expose them.
+# Containers publish only on 127.0.0.1 (docker-compose.yml). Docker's published ports bypass ufw, so loopback binding is
+# what actually keeps them off the public NIC; the tailscale0 rules above cover host processes. To use 4000/6080/8001
+# from another tailnet device today, use an SSH tunnel or `tailscale serve`.
 
 echo "== 6/9 repo + dirs"
 mkdir -p "$APP_DIR" "$WORKSPACE"

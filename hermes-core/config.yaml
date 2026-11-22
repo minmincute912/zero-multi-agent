@@ -57,12 +57,6 @@ mcp_servers:
     connect_timeout: 30
     enabled: true
 
-  node-control-plane:
-    url: "http://127.0.0.1:8002/mcp"
-    timeout: 300
-    connect_timeout: 30
-    enabled: true
-
 # --- Skills: Git-tracked, loaded from this repo and used as the write target for agent-created skills ---
 skills:
   create_dir: ${HERMES_CORE_DIR}/skills

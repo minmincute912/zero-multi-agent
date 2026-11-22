@@ -1,7 +1,7 @@
 # Run from the repo root so secrets come from ./.env:
 #   docker compose --env-file .env -f docker-services/docker-compose.yml up -d
 # Every published port is bound to 127.0.0.1. Reach them remotely over Tailscale or an SSH tunnel, never the public NIC.
-# Resource caps are hard limits sized for the 4 vCPU / 8 GB VPS (leaves ~3.5 GB for the OS and native Hermes).
+# Resource caps are hard limits sized for a 3 vCPU / 6 GB VPS (3.5 GB of caps leaves ~2.5 GB for the OS, swap and native Hermes).
 
 name: hermes-platform
 
@@ -24,6 +24,7 @@ services:
       CLOUDFLARE_API_KEY: ${CLOUDFLARE_API_KEY:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       NOUS_API_KEY: ${NOUS_API_KEY:-}
+      COLAB_OLLAMA_BASE_URL: ${COLAB_OLLAMA_BASE_URL:-}
     volumes:
       - ./inference-router/config.yaml:/app/config.yaml:ro
     ports: ["127.0.0.1:4000:4000"]
@@ -60,31 +61,6 @@ services:
       retries: 3
       start_period: 30s
 
-  node-control-plane:
-    <<: *common
-    image: ghcr.io/${GHCR_OWNER:-local}/hermes-node-control-plane:${IMAGE_TAG:-latest}
-    build: ./node-control-plane
-    environment:
-      NODES_FILE: /config/nodes.yaml
-      STATE_FILE: /data/state.json
-      NODE_CF_SECRET: ${NODE_CF_SECRET:-}
-      NODE_COLAB_SECRET: ${NODE_COLAB_SECRET:-}
-    volumes:
-      - ./node-control-plane/config:/config:ro      # a directory, so Docker never creates a missing file as a directory
-      - control-plane-data:/data
-    ports: ["127.0.0.1:8002:8002"]
-    mem_limit: 256m
-    cpus: 0.5
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8002), 3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
 networks:
   agent-net:
     name: agent-net   # services reach each other by name; add future plugins here
-
-volumes:
-  control-plane-data:

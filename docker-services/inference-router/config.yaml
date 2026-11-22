@@ -1,15 +1,19 @@
 # LiteLLM proxy config: one OpenAI-compatible endpoint (http://127.0.0.1:4000/v1) over free-tier providers.
-# Model groups (what Hermes asks for):  light  |  heavy  |  coder
+# Model groups (what Hermes asks for):  light  |  heavy  |  coder   (heavy-backup is fallback-only)
 # Several deployments sharing one model_name are load-balanced; a deployment that returns 429/errors is put on
 # cooldown and the request retried on another one, then on the group's fallback.
 #
-# Model IDs below were read from the providers' live lists on 2026-11-17 (OpenRouter /api/v1/models, Cloudflare docs).
+# Model IDs below were read from the providers' live lists on 2026-11-22 (OpenRouter and Nous /v1/models, Cloudflare docs).
 # Free catalogs rotate often: run deploy/list-free-models.sh and update this file by PR.
 # Only free models belong here. Nothing in this file can bill unless you add a paid model.
 
 model_list:
   # ---- light: classify, summarize, JSON parsing (Cloudflare Workers AI free quota) ----
   # Needs CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID in the environment.
+  - model_name: light
+    litellm_params:
+      model: cloudflare/@cf/meta/llama-3.2-1b-instruct
+      api_key: os.environ/CLOUDFLARE_API_KEY
   - model_name: light
     litellm_params:
       model: cloudflare/@cf/meta/llama-3.2-3b-instruct
@@ -33,27 +37,48 @@ model_list:
       model: openrouter/nvidia/nemotron-3.5-lightning:free
       api_key: os.environ/OPENROUTER_API_KEY
 
-  # TODO: Nous Portal free models. No model ID is hardcoded because I could not verify the catalog.
-  # Run deploy/list-free-models.sh with NOUS_API_KEY set, pick a free model, then uncomment:
-  # - model_name: heavy
-  #   litellm_params:
-  #     model: openai/<nous-free-model-id>
-  #     api_base: https://inference-api.nousresearch.com/v1
-  #     api_key: os.environ/NOUS_API_KEY
-
-  # ---- coder: code-oriented free model ----
+  # ---- coder: OpenRouter has no code-specific free model in its 2026-11-22 list (cohere/north-mini-code:free is gone),
+  # so this group uses the largest general free models. Swap in a code model when one appears. ----
   - model_name: coder
     litellm_params:
-      model: openrouter/cohere/north-mini-code:free
+      model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
       api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: coder
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # ---- heavy-backup: used only after heavy/coder fail (see fallbacks). Not called by Hermes directly. ----
+  # Nous Portal free models (ids ending ":free", price 0, tool calling; catalog is public at
+  # https://inference-api.nousresearch.com/v1/models). Needs NOUS_API_KEY.
+  - model_name: heavy-backup
+    litellm_params:
+      model: openai/qwen/qwen4-max:free
+      api_base: https://inference-api.nousresearch.com/v1
+      api_key: os.environ/NOUS_API_KEY
+  - model_name: heavy-backup
+    litellm_params:
+      model: openai/stepfun/step-3.7-flash:free
+      api_base: https://inference-api.nousresearch.com/v1
+      api_key: os.environ/NOUS_API_KEY
+
+  # Optional: Ollama on a Google Colab T4 reached over Tailscale. Colab sessions die after hours, so keep it last.
+  # To enable: set COLAB_OLLAMA_BASE_URL in .env (e.g. http://100.x.y.z:11434), pull a model there
+  # (`ollama pull <tag>`), put that exact tag below and uncomment. Left commented so an unset
+  # COLAB_OLLAMA_BASE_URL cannot break router startup.
+  # - model_name: heavy-backup
+  #   litellm_params:
+  #     model: ollama_chat/<ollama-model-tag>
+  #     api_base: os.environ/COLAB_OLLAMA_BASE_URL
 
 litellm_settings:
   drop_params: true              # free models reject some OpenAI params; drop instead of failing
   num_retries: 2                 # retries per model_name before falling back
   request_timeout: 60
   turn_off_message_logging: true # do not keep prompt/response bodies in logs
-  # Fallback is tried once per request. heavy has none on purpose: a 3B model must not silently answer hard tasks.
-  fallbacks: [{"light": ["heavy"]}, {"coder": ["heavy"]}]
+  # Fallback is tried once per request, in order. Free quotas are the weak point, so the chain widens instead of
+  # downgrading: a 1-3B model must never silently answer a heavy or coder task.
+  fallbacks: [{"light": ["heavy", "heavy-backup"]}, {"heavy": ["heavy-backup"]}, {"coder": ["heavy", "heavy-backup"]}]
   context_window_fallbacks: [{"light": ["heavy"]}]   # Cloudflare 3B has a smaller window than the heavy pool
 
 router_settings:

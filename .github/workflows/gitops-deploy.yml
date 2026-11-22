@@ -72,8 +72,7 @@ jobs:
           def load(path):
               spec = importlib.util.spec_from_file_location("srv", path)
               m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-          for path, want in [("mcp-plugins/_template/server.py", {"ping", "echo"}),
-                             ("docker-services/node-control-plane/server.py", {"list_nodes", "health_check", "dispatch_job", "quota_status"})]:
+          for path, want in [("mcp-plugins/_template/server.py", {"ping", "echo"})]:
               m = load(path)
               tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
               if not want <= tools: sys.exit(f"{path}: missing tools {want - tools}")
@@ -101,7 +100,7 @@ jobs:
           fi
           echo "build=$([ "$changed" = no ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           # image name -> build context. Plugins are every mcp-plugins/<dir> not starting with "_".
-          items='[{"name":"mcp-web-worker","context":"docker-services/mcp-web-worker"},{"name":"node-control-plane","context":"docker-services/node-control-plane"}'
+          items='[{"name":"mcp-web-worker","context":"docker-services/mcp-web-worker"}'
           for d in mcp-plugins/*/; do
             n=$(basename "$d"); case "$n" in _*) continue;; esac
             items="$items,{\"name\":\"$n\",\"context\":\"mcp-plugins/$n\"}"
@@ -143,23 +142,31 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   deploy:
-    # Runs after a successful build, or when nothing needed building (config/skills-only change).
+    # Runs on every push to main, after a successful build or when nothing needed building (config/skills-only change).
+    # Missing Tailscale secrets or VPS_HOST skip the sync with a warning instead of failing CI; the VPS timer still pulls.
     needs: [discover, build]
-    if: >-
-      always() && needs.discover.result == 'success' &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
-      vars.DEPLOY_VIA_TAILSCALE == 'true'
+    if: always() && needs.discover.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
     concurrency: { group: vps-deploy, cancel-in-progress: false }
     steps:
       # One-time setup: Tailscale OAuth client (secrets TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET, tag:ci) and an ACL that
-      # lets tag:ci use Tailscale SSH to <APP_USER>@VPS. Repository variables: DEPLOY_VIA_TAILSCALE=true, VPS_HOST, VPS_USER.
-      - uses: tailscale/github-action@v4
+      # lets tag:ci use Tailscale SSH to <VPS_USER>@VPS. Repository variables: VPS_HOST (tailnet name), VPS_USER (default hermes).
+      - id: cfg
+        env:
+          TS_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+        run: |
+          if [ -n "$TS_ID" ] && [ -n "$TS_SECRET" ] && [ -n "$VPS_HOST" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::deploy skipped: set secrets TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET and variable VPS_HOST"; echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.cfg.outputs.ready == 'true'
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
       - name: Sync VPS (only changed parts are touched; Hermes restarts via `gateway restart` only if its config changed)
+        if: steps.cfg.outputs.ready == 'true'
         run: |
           ssh -o StrictHostKeyChecking=accept-new "${{ vars.VPS_USER || 'hermes' }}@${{ vars.VPS_HOST }}" \
             '/opt/hermes-platform/deploy/update-vps.sh'
