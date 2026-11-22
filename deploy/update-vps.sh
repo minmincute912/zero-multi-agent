@@ -4,8 +4,7 @@
 #   update-vps.sh --force    re-apply everything (first run after setup-vps.sh)
 #
 # Session safety: Hermes is restarted only when hermes-core/config.yaml or SOUL.md changed, via
-# `hermes gateway restart` (drains in-flight turns first). Containers are touched only when docker-services/ or
-# mcp-plugins/ changed, and `compose up` recreates only services whose image/config changed.
+# `hermes gateway restart` (drains in-flight turns first). Containers are touched only when docker-services/ changed, and `compose up` recreates only services whose image/config changed.
 set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-/opt/hermes-platform}
@@ -50,7 +49,7 @@ if want '^hermes-core/(config\.yaml|SOUL\.md)$'; then
 fi
 
 # --- Docker services ---
-if want '^(docker-services|mcp-plugins)/'; then
+if want '^docker-services/'; then
   dc config -q   # validate before touching anything that is running
   dc up -d --build --remove-orphans --wait --wait-timeout 180 \
     || { echo "ERROR: services unhealthy after update" >&2; dc ps >&2; dc logs --tail 30 >&2; exit 1; }

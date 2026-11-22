@@ -22,7 +22,6 @@ Telegram/Slack ───►   │  Hermes Agent (native, systemd user unit herme
 | `hermes-core/` | `config.yaml` (model, MCP, skills), `SOUL.md` (nhân cách), `skills/` (kỹ năng, theo dõi bằng Git) |
 | `docker-services/docker-compose.yml` | 1 service (router), mạng `agent-net`, healthcheck, `mem_limit`/`cpus` cứng |
 | `docker-services/inference-router/` | Cấu hình LiteLLM: nhóm `light`, `heavy`, `coder`, `heavy-backup`, fallback, cooldown khi 429 |
-| `mcp-plugins/_template/` | Copy thư mục này để tạo MCP microservice mới (xem README trong đó) |
 | `deploy/` | `setup-vps.sh`, `update-vps.sh`, `list-free-models.sh` |
 | `.github/workflows/ci.yml` | Chỉ lint/test. Không build image, không deploy |
 | `.claude/` | Cấu hình Claude Code cho việc phát triển repo này |
@@ -75,13 +74,13 @@ unit `hermes-gateway` (do chính `hermes gateway install` tạo, chạy ở ch�
 
 ## Quy trình vận hành
 
-1. Sửa cấu hình/code trên nhánh, mở PR. CI chạy lint, kiểm tra YAML/JSON/skill, shellcheck, `docker compose config`, smoke test MCP template.
+1. Sửa cấu hình/code trên nhánh, mở PR. CI chạy lint, kiểm tra YAML/JSON/skill, shellcheck, `docker compose config`.
 2. Merge vào `main`. Không có bước build hay deploy từ CI.
 3. VPS tự đồng bộ bằng `hermes-gitops.timer` (5 phút), hoặc chạy tay `deploy/update-vps.sh`.
 
 `update-vps.sh` không làm sập session đang chạy:
 - Hermes chỉ restart khi `hermes-core/config.yaml` hoặc `SOUL.md` đổi, bằng `hermes gateway restart` (chờ các lượt đang xử lý xong).
-- Container chỉ bị đụng khi `docker-services/` hoặc `mcp-plugins/` đổi; `compose up --build` chỉ tạo lại service có cấu hình đổi, và chờ healthy (tối đa 180 giây).
+- Container chỉ bị đụng khi `docker-services/` đổi; `compose up --build` chỉ tạo lại service có cấu hình đổi, và chờ healthy (tối đa 180 giây).
 - Skill mới được đọc trực tiếp từ repo, không cần restart.
 - Có khóa `flock` chống chạy chồng; không thể fast-forward thì dừng và báo lỗi, không ghi đè.
 

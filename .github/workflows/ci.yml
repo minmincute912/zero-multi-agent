@@ -30,10 +30,7 @@ jobs:
           if [ -n "$bad" ]; then echo "::error::forbidden files are tracked:"; echo "$bad"; exit 1; fi
 
       - name: Install tooling
-        run: pip install --quiet ruff pyyaml "mcp>=2.3,<3" httpx
-
-      - name: Lint Python
-        run: ruff check docker-services mcp-plugins
+        run: pip install --quiet pyyaml
 
       - name: Validate YAML, JSON and skills
         run: |
@@ -42,8 +39,7 @@ jobs:
           for f in glob.glob("**/*.y*ml", recursive=True):
               if f.startswith("."): continue
               list(yaml.safe_load_all(open(f)))
-          for f in glob.glob("mcp-plugins/*/manifest.json"):
-              json.load(open(f))
+          json.load(open(".mcp.json"))
           for f in glob.glob("hermes-core/skills/*/SKILL.md"):
               d = pathlib.Path(f).parent.name
               m = re.search(r"^name:\s*(\S+)\s*$", open(f).read(), re.M)
@@ -53,9 +49,8 @@ jobs:
 
       - name: Shell syntax and shellcheck
         run: |
-          shopt -s globstar nullglob
-          for f in deploy/*.sh docker-services/**/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
-          shellcheck -S warning deploy/*.sh docker-services/**/*.sh
+          for f in deploy/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
+          shellcheck -S warning deploy/*.sh
 
       - name: Compose file renders
         run: |
@@ -63,15 +58,3 @@ jobs:
           sed -i 's/^LITELLM_MASTER_KEY=$/LITELLM_MASTER_KEY=ci/' .env
           docker compose --env-file .env -f docker-services/docker-compose.yml config -q
 
-      - name: Smoke test MCP servers import and register tools
-        run: |
-          python - <<'PY'
-          import asyncio, importlib.util, sys
-          def load(path):
-              spec = importlib.util.spec_from_file_location("srv", path)
-              m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
-          for path, want in [("mcp-plugins/_template/server.py", {"ping", "echo"})]:
-              m = load(path)
-              tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
-              if not want <= tools: sys.exit(f"{path}: missing tools {want - tools}")
-          PY

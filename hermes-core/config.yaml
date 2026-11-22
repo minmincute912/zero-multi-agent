@@ -49,7 +49,7 @@ mcp_servers:
     timeout: 120
     enabled: true
 
-  # Add Streamable HTTP MCP servers here (no `transport: sse`: SSE is legacy), e.g. a service from mcp-plugins/.
+  # Add Streamable HTTP MCP servers here (no `transport: sse`: SSE is legacy).
 
 # --- Skills: Git-tracked, loaded from this repo and used as the write target for agent-created skills ---
 skills:
