@@ -1,7 +1,6 @@
 # MCP plugin template
 
-Copy this directory to create a new MCP microservice. Directories under `mcp-plugins/` that do not start with `_` are
-built and pushed to GHCR by CI automatically.
+Copy this directory to create a new MCP microservice. It is built on the VPS by `docker compose up --build`; there is no registry.
 
 ## Create a plugin
 
@@ -12,7 +11,6 @@ built and pushed to GHCR by CI automatically.
    ```yaml
    <name>:
      <<: *common
-     image: ghcr.io/${GHCR_OWNER:-local}/hermes-<name>:${IMAGE_TAG:-latest}
      build: ../mcp-plugins/<name>
      ports: ["127.0.0.1:<host-port>:8000"]
      mem_limit: 256m

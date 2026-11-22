@@ -49,13 +49,7 @@ mcp_servers:
     timeout: 120
     enabled: true
 
-  # Docker services (docker-services/docker-compose.yml). Streamable HTTP is Hermes' default and the MCP SDK's
-  # recommended transport; SSE is legacy, so no `transport: sse` here.
-  mcp-web-worker:
-    url: "http://127.0.0.1:8001/mcp"
-    timeout: 300
-    connect_timeout: 30
-    enabled: true
+  # Add Streamable HTTP MCP servers here (no `transport: sse`: SSE is legacy), e.g. a service from mcp-plugins/.
 
 # --- Skills: Git-tracked, loaded from this repo and used as the write target for agent-created skills ---
 skills:

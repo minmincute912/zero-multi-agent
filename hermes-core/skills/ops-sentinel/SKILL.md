@@ -1,6 +1,6 @@
 ---
 name: ops-sentinel
-description: Set up and run a cron health check for the VPS, container RAM and Docker services (inference-router, mcp-web-worker), alerting only on problems. Use when asked to monitor the server, after deploying containers, or when the agent or an MCP server becomes unresponsive.
+description: Set up and run a cron health check for the VPS, container RAM and the inference-router container, alerting only on problems. Use when asked to monitor the server, after deploying containers, or when the agent or an MCP server becomes unresponsive.
 ---
 
 # Ops Sentinel
@@ -23,12 +23,12 @@ Health checks must cost no tokens: use a script-only cron job (`--no-agent`). Th
    [ "$disk" -ge 85 ] && echo "Disk ${disk}% used"
    docker stats --no-stream --format '{{.Name}} {{.MemPerc}}' 2>/dev/null |
      awk '{p=$2; sub("%","",p); if (p+0 >= 85) print "container " $1 " RAM " $2}'
-   for hp in localhost:4000 localhost:8001; do
+   for hp in localhost:4000; do
      curl -s -o /dev/null --max-time 3 "http://$hp/" \
        || [ $? -eq 28 ] || echo "service $hp unreachable"
    done
    ```
-   Any HTTP answer counts as alive (curl exits 0 even on 4xx). Exit 28 (timeout) is accepted because a Streamable HTTP endpoint may hold the connection open. Ports: 4000 inference-router, 8001 mcp-web-worker.
+   Any HTTP answer counts as alive (curl exits 0 even on 4xx). Exit 28 (timeout) is accepted because a Streamable HTTP endpoint may hold the connection open. Port 4000 is inference-router.
 2. **Schedule it**:
    ```
    hermes cron create "every 5m" --no-agent --script ops-check.sh --deliver <channel> --name "ops-sentinel"

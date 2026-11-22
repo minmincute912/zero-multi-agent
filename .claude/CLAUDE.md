@@ -4,10 +4,10 @@ Goal: run a resident agent on $0 inference (free-tier LLM APIs). Hermes Agent (N
 
 ## Layout
 - `hermes-core/`: `config.yaml` (model, MCP servers, skill dir; secrets via `${ENV_VAR}`, never inline), `SOUL.md`, `skills/<name>/SKILL.md` (agentskills.io; frontmatter `name` must equal the directory name).
-- `docker-services/`: `docker-compose.yml`, `inference-router/` (LiteLLM, model groups light/heavy/coder), `mcp-web-worker/`. Ports bind 127.0.0.1 only. Every free compute source (Cloudflare, OpenRouter, Nous, Colab Ollama) is an LLM endpoint behind `inference-router`; there is no separate compute orchestrator.
+- `docker-services/`: `docker-compose.yml`, `inference-router/` (LiteLLM, model groups light/heavy/coder/heavy-backup). Ports bind 127.0.0.1 only. Every free compute source (Cloudflare, OpenRouter, Nous, Colab Ollama) is an LLM endpoint behind `inference-router`; there is no separate compute orchestrator.
 - `mcp-plugins/_template/`: copy to create a new MCP service. MCP SDK is v2 (`MCPServer`, Streamable HTTP at `/mcp`, not SSE).
 - `deploy/`: `setup-vps.sh`, `update-vps.sh`, other ops scripts (idempotent, `set -euo pipefail`).
-- `.github/workflows/gitops-deploy.yml`: lint/test, GHCR build, VPS sync. See `README.md` for architecture and operations.
+- `.github/workflows/ci.yml`: lint/test only. The VPS syncs itself with `deploy/update-vps.sh` (timer). See `README.md`.
 - `.claude/`: Claude Code config, hooks, slash commands (`/new-mcp`, `/new-skill`, `/ship`).
 
 ## Rules

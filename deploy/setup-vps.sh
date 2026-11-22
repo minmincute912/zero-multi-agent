@@ -20,7 +20,7 @@ as_app() { sudo -u "$APP_USER" -H "$@"; }
 echo "== 1/9 packages + swap"
 apt-get update -qq
 apt-get install -y -qq curl git ca-certificates jq ufw openssl util-linux nodejs npm >/dev/null
-# 2 GB swap absorbs Chromium spikes. Skipped when the host already has any swap.
+# 2 GB swap absorbs memory spikes. Skipped when the host already has any swap.
 if [ -z "$(swapon --show --noheadings)" ]; then
   if [ ! -f /swapfile ]; then
     fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
@@ -32,7 +32,7 @@ fi
 
 echo "== 2/9 user $APP_USER"
 id "$APP_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$APP_USER"
-APP_UID=$(id -u "$APP_USER"); APP_GID=$(id -g "$APP_USER"); APP_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
+APP_UID=$(id -u "$APP_USER"); APP_HOME=$(getent passwd "$APP_USER" | cut -d: -f6)
 
 echo "== 3/9 docker"
 command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh
@@ -50,7 +50,7 @@ fi
 echo "== 5/9 firewall (deny inbound; Tailscale only reaches SSH and the service ports; public SSH rate-limited)"
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
-for port in 22 4000 6080 8001; do ufw allow in on tailscale0 to any port "$port" proto tcp >/dev/null; done
+for port in 22 4000; do ufw allow in on tailscale0 to any port "$port" proto tcp >/dev/null; done
 if [ "${CLOSE_PUBLIC_SSH:-0}" = 1 ]; then
   tailscale status >/dev/null 2>&1 || { echo "ERROR: refusing CLOSE_PUBLIC_SSH without a working Tailscale (you would lock yourself out)" >&2; exit 1; }
   ufw delete limit 22/tcp >/dev/null 2>&1 || true
@@ -59,7 +59,7 @@ else
 fi
 ufw --force enable >/dev/null
 # Containers publish only on 127.0.0.1 (docker-compose.yml). Docker's published ports bypass ufw, so loopback binding is
-# what actually keeps them off the public NIC; the tailscale0 rules above cover host processes. To use 4000/6080/8001
+# what actually keeps them off the public NIC; the tailscale0 rules above cover host processes. To use 4000
 # from another tailnet device today, use an SSH tunnel or `tailscale serve`.
 
 echo "== 6/9 repo + dirs"
@@ -68,7 +68,6 @@ chown "$APP_USER:$APP_USER" "$APP_DIR" "$WORKSPACE"
 if [ ! -d "$APP_DIR/.git" ]; then
   as_app git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"   # private repo: use a read-only deploy key, not a token in the URL
 fi
-as_app mkdir -p "$APP_DIR/docker-services/browser-profiles"
 
 echo "== 7/9 secrets files"
 set_kv() { # set_kv FILE KEY VALUE : set only when the key is missing or empty
@@ -82,8 +81,6 @@ ENV_FILE="$APP_DIR/.env"
 KEY=$(grep '^LITELLM_MASTER_KEY=.' "$ENV_FILE" | cut -d= -f2- || true)
 [ -n "$KEY" ] || KEY="sk-$(openssl rand -hex 24)"
 set_kv "$ENV_FILE" LITELLM_MASTER_KEY "$KEY"
-set_kv "$ENV_FILE" VNC_PASSWORD "$(openssl rand -hex 8)"
-set_kv "$ENV_FILE" HOST_UID "$APP_UID"; set_kv "$ENV_FILE" HOST_GID "$APP_GID"
 chown "$APP_USER:$APP_USER" "$ENV_FILE"
 HERMES_ENV="$APP_HOME/.hermes/.env"
 as_app mkdir -p "$APP_HOME/.hermes"
@@ -137,12 +134,10 @@ systemctl enable --now hermes-gitops.timer >/dev/null
 cat <<EOF
 
 Setup finished. Remaining manual steps (as root, then as $APP_USER):
-  1. Edit $ENV_FILE: set OPENROUTER_API_KEY, CLOUDFLARE_API_KEY, CLOUDFLARE_ACCOUNT_ID (LITELLM_MASTER_KEY and VNC_PASSWORD were generated).
+  1. Edit $ENV_FILE: set OPENROUTER_API_KEY, CLOUDFLARE_API_KEY, CLOUDFLARE_ACCOUNT_ID (LITELLM_MASTER_KEY was generated).
   2. sudo -iu $APP_USER                       # then:
      $APP_DIR/deploy/update-vps.sh --force    # applies Hermes config and starts the containers
      hermes gateway setup                     # messaging platform + allowed users
      hermes gateway start && hermes gateway status
-  3. First manual web login (2FA/captcha): over Tailscale, open http://127.0.0.1:6080 through an SSH tunnel
-     (ssh -L 6080:127.0.0.1:6080 $APP_USER@<tailnet-host>); VNC password is VNC_PASSWORD in $ENV_FILE.
-  4. Logs: journalctl --user -u hermes-gateway -f   |   docker compose -f $APP_DIR/docker-services/docker-compose.yml logs -f
+  3. Logs: journalctl --user -u hermes-gateway -f   |   docker compose -f $APP_DIR/docker-services/docker-compose.yml logs -f
 EOF

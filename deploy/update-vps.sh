@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GitOps sync, run as the app user (hermes-gitops.timer every 5 min, or CI over Tailscale SSH). Idempotent.
+# GitOps sync, run as the app user (hermes-gitops.timer every 5 min, or by hand). Idempotent.
 #   update-vps.sh            apply only what changed since the last run
 #   update-vps.sh --force    re-apply everything (first run after setup-vps.sh)
 #
@@ -51,14 +51,8 @@ fi
 
 # --- Docker services ---
 if want '^(docker-services|mcp-plugins)/'; then
-  mkdir -p docker-services/browser-profiles
   dc config -q   # validate before touching anything that is running
-  # Our own images (everything with a build section except the stock LiteLLM image): pull from GHCR, else build locally.
-  mapfile -t own < <(dc config --services | grep -vx inference-router)
-  if [ "${#own[@]}" -gt 0 ]; then
-    dc pull --quiet "${own[@]}" 2>/dev/null || dc build --quiet "${own[@]}"
-  fi
-  dc up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+  dc up -d --build --remove-orphans --wait --wait-timeout 180 \
     || { echo "ERROR: services unhealthy after update" >&2; dc ps >&2; dc logs --tail 30 >&2; exit 1; }
   docker image prune -f >/dev/null
 fi

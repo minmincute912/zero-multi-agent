@@ -1,0 +1,77 @@
+name: ci
+
+# Lint and test on every PR and push to main. There is no image build or deploy job: the VPS pulls the repo itself
+# (hermes-gitops.timer runs deploy/update-vps.sh every 5 minutes).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.13" }
+
+      - name: Block secrets and local state in the tree
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)\.env(\..+)?$|\.sqlite3?$|(^|/)browser-profiles/' | grep -Ev '(^|/)\.env\.(example|sample|template)$' || true)
+          if [ -n "$bad" ]; then echo "::error::forbidden files are tracked:"; echo "$bad"; exit 1; fi
+
+      - name: Install tooling
+        run: pip install --quiet ruff pyyaml "mcp>=2.3,<3" httpx
+
+      - name: Lint Python
+        run: ruff check docker-services mcp-plugins
+
+      - name: Validate YAML, JSON and skills
+        run: |
+          python - <<'PY'
+          import glob, json, pathlib, re, sys, yaml
+          for f in glob.glob("**/*.y*ml", recursive=True):
+              if f.startswith("."): continue
+              list(yaml.safe_load_all(open(f)))
+          for f in glob.glob("mcp-plugins/*/manifest.json"):
+              json.load(open(f))
+          for f in glob.glob("hermes-core/skills/*/SKILL.md"):
+              d = pathlib.Path(f).parent.name
+              m = re.search(r"^name:\s*(\S+)\s*$", open(f).read(), re.M)
+              if not m or m.group(1) != d:
+                  sys.exit(f"{f}: frontmatter name must equal directory name {d!r}")
+          PY
+
+      - name: Shell syntax and shellcheck
+        run: |
+          shopt -s globstar nullglob
+          for f in deploy/*.sh docker-services/**/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
+          shellcheck -S warning deploy/*.sh docker-services/**/*.sh
+
+      - name: Compose file renders
+        run: |
+          cp .env.example .env
+          sed -i 's/^LITELLM_MASTER_KEY=$/LITELLM_MASTER_KEY=ci/' .env
+          docker compose --env-file .env -f docker-services/docker-compose.yml config -q
+
+      - name: Smoke test MCP servers import and register tools
+        run: |
+          python - <<'PY'
+          import asyncio, importlib.util, sys
+          def load(path):
+              spec = importlib.util.spec_from_file_location("srv", path)
+              m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+          for path, want in [("mcp-plugins/_template/server.py", {"ping", "echo"})]:
+              m = load(path)
+              tools = {t.name for t in asyncio.run(m.mcp.list_tools())}
+              if not want <= tools: sys.exit(f"{path}: missing tools {want - tools}")
+          PY

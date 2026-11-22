@@ -1,7 +1,7 @@
 # Run from the repo root so secrets come from ./.env:
 #   docker compose --env-file .env -f docker-services/docker-compose.yml up -d
 # Every published port is bound to 127.0.0.1. Reach them remotely over Tailscale or an SSH tunnel, never the public NIC.
-# Resource caps are hard limits sized for a 3 vCPU / 6 GB VPS (3.5 GB of caps leaves ~2.5 GB for the OS, swap and native Hermes).
+# The router's resource caps are hard limits sized for a 3 vCPU / 6 GB VPS (leaves the rest for the OS and native Hermes).
 
 name: hermes-platform
 
@@ -36,30 +36,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
-
-  mcp-web-worker:
-    <<: *common
-    image: ghcr.io/${GHCR_OWNER:-local}/hermes-mcp-web-worker:${IMAGE_TAG:-latest}
-    build: ./mcp-web-worker
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"   # owner of ./browser-profiles on the host
-    environment:
-      VNC_PASSWORD: ${VNC_PASSWORD:?set VNC_PASSWORD in .env}
-      PROFILE_DIR: /data/profile
-      HOME: /tmp
-    volumes:
-      - ./browser-profiles:/data/profile            # cookies/sessions survive restarts; git-ignored
-    ports:
-      - "127.0.0.1:8001:8001"                       # MCP (Streamable HTTP, path /mcp)
-      - "127.0.0.1:6080:6080"                       # noVNC: manual login for 2FA/captcha
-    shm_size: 1gb                                   # Chromium crashes with the default 64 MB /dev/shm
-    mem_limit: 2g
-    cpus: 2.0
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), 3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
 networks:
   agent-net:
